@@ -31,6 +31,7 @@
       "Read(./.env.*)",
       "Read(**/*keypair*)",
       "Read(**/id.json)",
+      "Read(**/wallet.json)",
       "Bash(npm install:*)",
       "Bash(npm i:*)",
       "Bash(npx:*)",

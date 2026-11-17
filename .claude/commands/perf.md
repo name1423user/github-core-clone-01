@@ -6,3 +6,4 @@ description: 合格率100%の状態から、ベンチの速度を詰める
 2. `perf-engineer` サブエージェントに、`docs/SCORING.md` で寄与が大きい順にベンチを高速化させる。対象: $ARGUMENTS（指定がなければ全ベンチ）
 3. 戻ってきたら `determinism-auditor` で決定性を確認する。
 4. `grader` で全体を採点し、合格数が1つでも減っていたら、その変更を戻す。
+5. 残す変更は `bash scripts/build.sh` で `forge-linux-x64` を作り直し、ソースと同じコミットに入れる（`bash scripts/check-binary.sh` が OK であること）。
