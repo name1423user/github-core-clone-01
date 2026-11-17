@@ -102,7 +102,7 @@ src/mcp/             transport / tools
 ```
 
 ### 4.0 ワイヤ契約（RULES.txt「The wire contract」）
-- `/api/*` と `/mcp` は `Authorization: Bearer $MAKEFUN_SHOP_TOKEN` 必須。無ければ 401。`/healthz`（200 `{"ok":true}`、boot で2回）と git smart HTTP は認証なし（suite の git クライアントはトークンを送らない）。
+- `/api/*` と `/mcp` は `Authorization: Bearer $MAKEFUN_SHOP_TOKEN` 必須。無ければ 401。`/healthz`（200 `{"ok":true}`、boot で2回）は認証なし。git smart HTTP は認証を要求しない（suite の git-client.ts:1344 はトークンを付けて送るが、トークンなしで git を叩くチェックは無い）。
 - REST の応答はすべて `application/json`（HTML 禁止）で、空でない `X-GitHub-Request-Id` を付ける。エラーは文字列の `message` を持つ JSON。未知のルートは 404 JSON、壊れた JSON ボディは 400。
 - リポジトリはトークンのログインのもの。同じ名前でも別オーナーなら 404（403 ではない）。
 

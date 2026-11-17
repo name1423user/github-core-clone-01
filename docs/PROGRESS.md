@@ -8,7 +8,7 @@
 
 - [x] キット取得・台帳照合（0.1.0 一致）・Rust 構成を main にマージ（PR #1）
 - [x] `src/util/json.rs`
-- [ ] spec-analyst の結果（INTERFACES/CHECKS/SCORING）をコミットし、るりあに4点を報告
+- [x] spec-analyst の結果（INTERFACES/CHECKS/SCORING）をコミットし、るりあに4点を報告
 - [ ] `src/store/` 型と ID カウンタ・日時（MAKEFUN_TRIAL_NOW）・node_id
 - [ ] `src/store/` repos / issues / labels / comments の操作関数
 - [ ] `src/store/` PR・git オブジェクト・ref の置き場（git-engineer と型を合わせる）
