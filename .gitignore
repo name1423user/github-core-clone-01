@@ -3,6 +3,13 @@ github-core-clone-01-kit/
 *-kit/
 *.tar.gz
 
+# Rust のビルド成果物
+target/
+
+# 開発用ネイティブバイナリ（コミット禁止）。提出用は forge-linux-x64 だけ
+forge-*
+!forge-linux-x64
+
 # ローカル採点のログ
 .grade/
 
@@ -11,6 +18,7 @@ github-core-clone-01-kit/
 .env.*
 *keypair*.json
 id.json
+wallet.json
 *.pem
 *.key
 
@@ -23,3 +31,4 @@ node_modules/
 .DS_Store
 *.cpuprofile
 *.heapprofile
+perf.data*

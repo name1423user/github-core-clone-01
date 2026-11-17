@@ -9,12 +9,13 @@
 
 make.fun バウンティ [github-core-clone-01](https://make.fun/bounty/github-core-clone-01) への応募作。
 UI を持たない単一プロセスのフォージで、git smart HTTP・REST v3・GraphQL・MCP を自前のストアから提供します。
-Node 22 の標準ライブラリのみで動き、外部サービスや git バイナリは使いません。
+本体は Rust（標準ライブラリのみ）の静的バイナリ `forge-linux-x64` で、`main.ts` はそれを起動するだけのランチャーです。外部サービスや git バイナリは使いません。
 
 ## Run it
 
 ```sh
-node main.ts
+bash scripts/build.sh   # forge-linux-x64 をビルド（Mac は bash scripts/build.sh dev でローカル用）
+MAKEFUN_ENV_URL=http://<suite> node main.ts
 ```
 
 ## License

@@ -1,16 +1,17 @@
 {
   "name": "github-core-clone-01",
-  "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "GitHub-compatible git forge (git smart HTTP, REST v3, GraphQL, MCP) on Node 22 stdlib only",
+  "description": "Launcher for the forge binary (Rust, static musl). The version file is Cargo.toml.",
   "license": "MIT",
   "engines": {
     "node": ">=22 <23"
   },
   "scripts": {
     "start": "node main.ts",
+    "build": "bash scripts/build.sh",
     "grade": "bash scripts/grade.sh",
-    "compliance": "node scripts/compliance.mjs"
+    "compliance": "node scripts/compliance.mjs",
+    "check-binary": "bash scripts/check-binary.sh"
   }
 }

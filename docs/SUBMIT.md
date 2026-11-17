@@ -3,12 +3,13 @@
 `/presubmit` で Claude が確認する項目と、るりあ本人が操作する項目。
 
 ## Claude が確認する
-- [ ] `node scripts/compliance.mjs` が OK（サイズ上限・外部 import なし・8080 なし・dependencies なし・秘密情報なし）
+- [ ] `node scripts/compliance.mjs` が OK（サイズ上限・ランチャーの import・8080 なし・依存なし・開発用バイナリの混入なし・秘密情報なし）
+- [ ] **`bash scripts/check-binary.sh` が全部 OK**（HEAD の `forge-linux-x64` が `file` で x86-64 の静的 ELF、8 MiB 以下、100755、ソースより古くない。Mac 版の誤提出防止）
 - [ ] 最新のローカル採点で全チェック合格、決定性 OK（`docs/PROGRESS.md` の先頭行）
 - [ ] practice の3インスタンスすべてで合格
 - [ ] git 履歴の全体に秘密情報がない
 - [ ] `node $KIT/cli/makefun.mjs bundle --dry-run` で、このフォルダの全セッション（サブエージェント含む）が拾われている
-- [ ] `package.json` の `version` と台帳 ruria-versions-registry が一致している
+- [ ] `Cargo.toml` の `version` と台帳 ruria-versions-registry が一致している
 - [ ] `docs/RUN_RECORD.md` が埋まっている
 
 ## るりあが操作する
