@@ -22,7 +22,7 @@ runs=1; [ "${TWICE:-0}" = "1" ] && runs=2
 status=0
 for i in $(seq 1 $runs); do
   echo "== grade-local (run $i) =="
-  ( cd "$KIT" && node cli/makefun.mjs grade-local --kit . --bot "$REPO" --driver process "$@" ) 2>&1 | tee "$OUT/run$i.log"
+  ( cd "$KIT" && node cli/makefun.mjs grade-local --kit . --bot "$REPO" --driver process --worktree "$@" ) 2>&1 | tee "$OUT/run$i.log"
   s=${PIPESTATUS[0]}; [ "$s" -ne 0 ] && status=$s
 done
 
