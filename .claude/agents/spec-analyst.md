@@ -10,7 +10,7 @@ model: inherit
 ## 読むもの（この順）
 キットのパスは `${KIT:-../github-core-clone-01-kit}`。
 1. `RULES.txt`、`competition.yaml`、`rules/instance.yaml`
-2. `starter/` 全部（特に `main.ts` のポート登録）
+2. `starter/` 全部（特に `main.ts` のライフサイクル。Rust の `src/main.rs` がこれを移植している）
 3. `program/env/src/main.ts`、`manifest.ts`、`export.ts`
 4. `program/env/src/checks-git.ts`、`checks-rest.ts`、`checks-graphql.ts`、`checks-mcp.ts`
 5. `git-client.ts`、`rest-client.ts`、`graphql-client.ts`、`mcp-client.ts`、`wire.ts`
@@ -18,8 +18,8 @@ model: inherit
 7. `practice/trial-*/`（中身の傾向を見るだけ。具体値は前提にしない）
 
 ## 書くもの
-- `docs/INTERFACES.md`: 起動方法（node のフラグ、環境変数）、ポート登録の正確な手順、state export のエンドポイントと形式、認証（トークンの渡され方）、タイムアウト、`model_call` が本競技で必須かどうか（RULES.txt の該当箇所を引用）。
-- `docs/CHECKS.md`: **全チェックを1行ずつ**、表で書く。列: `ID | 面(git/rest/graphql/mcp) | 要求（メソッド・パス・主なパラメータ） | 期待（ステータス・必須フィールド・副作用） | 重み/重要度 | 状態 | 担当`。状態は最初すべて `TODO`。チェックIDはソースの表記に合わせる。
+- `docs/INTERFACES.md`: 起動方法（環境変数。本体は Rust の静的バイナリで main.ts はランチャー）、ポート登録の正確な手順、state export のエンドポイントと形式、認証（トークンの渡され方）、タイムアウト、`model_call` が本競技で必須かどうか（RULES.txt の該当箇所を引用）。
+- `docs/CHECKS.md`: **全チェックを1行ずつ**、表で書く。列: `ID | 面(git/repos/issues/pulls/graphql/mcp/protocol) | 要求（メソッド・パス・主なパラメータ） | 期待（ステータス・必須フィールド・副作用） | 重み/重要度 | 状態 | 担当`。状態は最初すべて `TODO`。チェックIDはソースの表記に合わせる。
 - `docs/SCORING.md`: スコア式を正確に（pass/fail と各ベンチの寄与、正規化、calibration の基準値、ランキングの決まり方、ハウス超えの判定）。**どこに点が多く乗るか**と、実装の優先順位の提案。
 
 ## 守ること
