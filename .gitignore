@@ -1,0 +1,25 @@
+# キットはリポジトリの外（../github-core-clone-01-kit）に置く。万一中に置いても入れない
+github-core-clone-01-kit/
+*-kit/
+*.tar.gz
+
+# ローカル採点のログ
+.grade/
+
+# 秘密情報（絶対にコミットしない）
+.env
+.env.*
+*keypair*.json
+id.json
+*.pem
+*.key
+
+# 作業記録の束（提出時に別途アップロードする）
+*.bundle
+transcripts/
+
+# その他
+node_modules/
+.DS_Store
+*.cpuprofile
+*.heapprofile

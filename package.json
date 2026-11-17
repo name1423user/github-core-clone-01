@@ -1,0 +1,16 @@
+{
+  "name": "github-core-clone-01",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "GitHub-compatible git forge (git smart HTTP, REST v3, GraphQL, MCP) on Node 22 stdlib only",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22 <23"
+  },
+  "scripts": {
+    "start": "node main.ts",
+    "grade": "bash scripts/grade.sh",
+    "compliance": "node scripts/compliance.mjs"
+  }
+}
