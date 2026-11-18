@@ -10,6 +10,9 @@ use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 mod issues;
 mod objects;
+mod pulls;
+#[allow(unused_imports)]
+pub use pulls::FileChange;
 #[allow(unused_imports)] // used by git/rest once they land
 pub use objects::*;
 
