@@ -3,18 +3,13 @@
 
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::mpsc::{channel, Receiver};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 
 /// Largest request body accepted (a push of the clone history is well under this).
 const MAX_BODY: usize = 256 << 20;
 /// Per-connection thread stack. Threads count toward the pod's 256-pid limit, so keep them light.
 const STACK_SIZE: usize = 256 << 10;
-/// Connection threads started at boot. The clone bench holds ~100 keep-alive connections at once;
-/// starting their threads before the bench keeps clone/mmap/stack faults (costly under gVisor) out of it.
-const PREFORK: usize = 100;
 
 pub struct Request {
     pub method: String,
@@ -109,57 +104,14 @@ fn reason(status: u16) -> &'static str {
     }
 }
 
-/// Accept forever. Connection threads are pooled: a thread that finishes a connection waits for the next
-/// one instead of exiting, and a new thread starts only when none is idle (keep-alive connections hold
-/// their thread, so a connection never queues behind another).
+/// Accept forever; each connection gets its own thread running `handler` per request.
 pub fn serve(listener: TcpListener, handler: fn(&Request) -> Response) {
-    let (tx, rx) = channel::<TcpStream>();
-    let rx = Arc::new(Mutex::new(rx));
-    let idle = Arc::new(AtomicUsize::new(0));
-    let start = |first: Option<TcpStream>| {
-        let (rx, idle) = (rx.clone(), idle.clone());
-        let _ = thread::Builder::new().stack_size(STACK_SIZE).spawn(move || worker(first, &rx, &idle, handler));
-    };
-    for _ in 0..PREFORK {
-        start(None);
-    }
     for stream in listener.incoming() {
         let Ok(stream) = stream else { continue };
-        // Reserve an idle worker (each idle count is one worker about to recv exactly one stream).
-        let reserved = idle.fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_sub(1)).is_ok();
-        if reserved {
-            let _ = tx.send(stream);
-        } else {
-            start(Some(stream));
-        }
-    }
-}
-
-fn worker(mut next: Option<TcpStream>, rx: &Mutex<Receiver<TcpStream>>, idle: &AtomicUsize, handler: fn(&Request) -> Response) {
-    if next.is_none() {
-        prewarm();
-    }
-    loop {
-        if let Some(stream) = next.take() {
+        let _ = thread::Builder::new().stack_size(STACK_SIZE).spawn(move || {
             let _ = connection(stream, handler);
-        }
-        idle.fetch_add(1, Ordering::AcqRel);
-        let got = rx.lock().unwrap_or_else(|e| e.into_inner()).recv();
-        match got {
-            Ok(s) => next = Some(s),
-            Err(_) => return,
-        }
-    }
-}
-
-/// Touch (fill with non-zero, so calloc's untouched fresh pages don't count) the stack and the blocks a
-/// connection allocates, then free them into this thread's cache: the first connection reuses mapped pages.
-fn prewarm() {
-    let mut stack = [1u8; 48 << 10];
-    std::hint::black_box(&mut stack);
-    for size in [64 << 10, 4096, 2048, 1024, 512, 256, 128, 64] {
-        let v: Vec<Vec<u8>> = (0..4).map(|_| vec![1u8; size]).collect();
-        std::hint::black_box(&v);
+            crate::util::alloc::flush();
+        });
     }
 }
 
@@ -315,23 +267,6 @@ mod tests {
         assert!(out.contains("POST /a 3"), "{out}");
         assert!(out.contains("POST /b 5"), "{out}");
         assert_eq!(out.matches("x-github-request-id: R").count(), 2);
-    }
-
-    #[test]
-    fn pool_serves_more_connections_than_prefork() {
-        let l = TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = l.local_addr().unwrap().port();
-        thread::spawn(move || serve(l, echo));
-        // All held open at once (keep-alive), then each served: none may queue behind another.
-        let mut conns: Vec<TcpStream> = (0..PREFORK + 20).map(|_| TcpStream::connect(("127.0.0.1", port)).unwrap()).collect();
-        for _ in 0..2 {
-            for c in conns.iter_mut() {
-                c.write_all(b"GET /x HTTP/1.1\r\n\r\n").unwrap();
-                let mut buf = [0u8; 256];
-                let n = c.read(&mut buf).unwrap();
-                assert!(buf[..n].starts_with(b"HTTP/1.1 200"));
-            }
-        }
     }
 }
 
