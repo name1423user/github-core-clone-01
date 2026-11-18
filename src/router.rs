@@ -19,7 +19,7 @@ fn authorized(req: &Request) -> bool {
 }
 
 fn unauthorized() -> Response {
-    Response::json(401, r#"{"message":"Requires authentication","documentation_url":"https://docs.github.com/rest"}"#)
+    Response::error(401, "Requires authentication")
 }
 
 pub fn route(req: &Request) -> Response {

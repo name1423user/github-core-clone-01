@@ -9,7 +9,7 @@
 2. `CLAUDE.md` を読む（規約・持ち場・アーキテクチャの正本）。このファイルと `docs/PROGRESS.md` の作業キューも読む。
 3. キットが無ければ取る: `ls ../github-core-clone-01-kit || bash scripts/fetch-kit.sh`（sha256 照合 63 件 OK を確認）
 4. ツール: `rustup target add x86_64-unknown-linux-musl`（クラウドのコンテナは毎回入れ直しが必要）
-5. 台帳の照合（version-registry スキル）。版番号ファイルは **`Cargo.toml` の `version`**（いま 0.1.0、台帳も 0.1.0）。
+5. 台帳の照合（version-registry スキル）。版番号ファイルは **`Cargo.toml` の `version`**（いま 0.3.0、台帳も 0.3.0）。
    - 台帳 `ruria-versions-registry` は main で読み書き・main に直接 push（強制 push 禁止）。
    - 台帳に `vela 0.1.1` の未マージのコミットがあるが別プロジェクト。触らない。
 6. 作業ブランチの最新を取る: `git fetch origin && git checkout <指定の作業ブランチ> && git merge origin/main`
@@ -32,7 +32,8 @@
   - `src/router.rs` パス分割、`/api/*`・`/mcp` の Bearer 認証、`/healthz`
   - `src/util/json.rs` パーサ・シリアライザ（オブジェクトは挿入順の Vec＝出力順が固定）。API: `json::parse(&[u8]) -> Result<Value,String>`、`Value::{get,str_field,as_str,as_i64,as_bool,as_array,to_json,write}`、`json::obj(vec![("k", v.into())])`、`json::write_str`
   - `docs/CHECKS.md`（120件、全行に根拠、状態は全部 TODO）、`docs/SCORING.md`、`docs/INTERFACES.md`
-- 未着手: `src/store/`（中身は空）、REST・GraphQL・MCP・git はスタブ（404 を返すだけ）
+- 2026-11-18 午後: `src/store/`（repos・issues・labels・comments・objects・contents の commit_file・PR の squash マージ）、`src/util/{sha1,zlib}.rs`、`Response::error`・`Request::json` 完成。作業ブランチは `claude/sharp-davinci-sqambb`。
+- REST・git・MCP は担当エージェントが実装中（PROGRESS の作業キュー参照）。GraphQL は未着手。
 - 直近のローカル採点: `bash scripts/grade.sh` → `working 1, feature 15, score 15`、replay はバイト一致。
 
 ## 分かっている重要な事実（spec-analyst の調査、根拠は docs/*）

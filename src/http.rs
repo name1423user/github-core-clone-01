@@ -26,6 +26,23 @@ impl Request {
     pub fn header(&self, name: &str) -> Option<&str> {
         self.headers.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str())
     }
+
+    /// The body as JSON. Malformed → 400 `{"message":"Problems parsing JSON"}` (protocol.malformed-body-400).
+    /// An empty body reads as `{}`.
+    pub fn json(&self) -> Result<crate::util::json::Value, Response> {
+        if self.body.iter().all(|b| b.is_ascii_whitespace()) {
+            return Ok(crate::util::json::obj(vec![]));
+        }
+        crate::util::json::parse(&self.body).map_err(|_| Response::error(400, "Problems parsing JSON"))
+    }
+
+    /// First value of a query parameter, percent-decoded.
+    pub fn query_param(&self, name: &str) -> Option<String> {
+        self.query.split('&').find_map(|kv| {
+            let (k, v) = kv.split_once('=').unwrap_or((kv, ""));
+            (k == name).then(|| percent_decode(v))
+        })
+    }
 }
 
 pub struct Response {
@@ -50,7 +67,16 @@ impl Response {
     }
 
     pub fn not_found() -> Response {
-        Response::json(404, r#"{"message":"Not Found","documentation_url":"https://docs.github.com/rest"}"#)
+        Response::error(404, "Not Found")
+    }
+
+    /// GitHub's error shape: `{"message", "documentation_url"}`.
+    pub fn error(status: u16, message: &str) -> Response {
+        let mut b = String::with_capacity(64 + message.len());
+        b.push_str("{\"message\":");
+        crate::util::json::write_str(&mut b, message);
+        b.push_str(",\"documentation_url\":\"https://docs.github.com/rest\"}");
+        Response::json(status, b)
     }
 
     pub fn with_header(mut self, name: &'static str, value: impl Into<String>) -> Response {
@@ -240,5 +266,33 @@ mod tests {
         assert!(out.contains("POST /a 3"), "{out}");
         assert!(out.contains("POST /b 5"), "{out}");
         assert_eq!(out.matches("x-github-request-id: R").count(), 2);
+    }
+}
+
+/// `%XX` and `+` (as space) decoding; invalid escapes pass through.
+pub fn percent_decode(s: &str) -> String {
+    let hex = |c: u8| (c as char).to_digit(16).map(|d| d as u8);
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        match (b[i], b.get(i + 1).copied().and_then(hex), b.get(i + 2).copied().and_then(hex)) {
+            (b'%', Some(h), Some(l)) => {
+                out.push(h << 4 | l);
+                i += 2;
+            }
+            (b'+', ..) => out.push(b' '),
+            (c, ..) => out.push(c),
+        }
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+#[cfg(test)]
+mod decode_tests {
+    #[test]
+    fn decode() {
+        assert_eq!(super::percent_decode("a%2Fb+c%zz%4"), "a/b c%zz%4");
     }
 }

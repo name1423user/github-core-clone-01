@@ -15,3 +15,6 @@
 - 2026-11-17: 認証は `/api/*` と `/mcp` だけに要求する。git-client はトークンを送らない（REST でのリポジトリ作成の補助のときだけ送る）。
 - 2026-11-17: キットはリポジトリの外（`../github-core-clone-01-kit`）に置く。サイズ上限と受付審査のため。
 - 2026-11-17: 持ち場を分けて並列実装する（CLAUDE.md §3）。ストア・HTTP・JSON はリードだけが変更する。ビルド担当（build-engineer）を新設。
+- 2026-11-18: viewer のログイン `adaiversen` は `store::VIEWER` に定数で置く。根拠: wire.ts:751 `SCENARIO_SEED`（「Never change it: it is the contest's fixed data」）から決まる users[0] で、checks-graphql.ts:865 は `harness.viewer` と照合する。インスタンスに依存しない。
+- 2026-11-18: node_id は `<種別の接頭辞><DB の id>`（例 `R_kgDO12`）。REST の `node_id` と GraphQL の `id` で共有し、`parse_node_id` で逆引きする。数字だけの id・number と必ず異なる（graphql.global-id-stability）。
+- 2026-11-18: フォージが書く日時はすべて MAKEFUN_TRIAL_NOW の1点（RFC 3339 か epoch ms、未設定なら 2025-01-01T00:00:00Z）。同時刻の並びは number で決める。
