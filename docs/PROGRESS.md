@@ -10,7 +10,7 @@
 - [x] `src/util/json.rs`
 - [x] spec-analyst の結果（INTERFACES/CHECKS/SCORING）をコミットし、るりあに4点を報告
 - [x] `src/store/` 型と ID カウンタ・日時（MAKEFUN_TRIAL_NOW）・node_id
-- [ ] `src/store/` repos / issues / labels / comments の操作関数
+- [x] `src/store/` repos / issues / labels / comments の操作関数
 - [ ] `src/store/` PR・git オブジェクト・ref の置き場（git-engineer と型を合わせる）
 - [ ] router: 壊れた JSON → 400、共通エラーのヘルパ
 - [ ] `cargo test` → `build.sh` → `grade.sh` → バイナリごとコミット

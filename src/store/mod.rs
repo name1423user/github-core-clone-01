@@ -8,6 +8,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
+mod issues;
+
 pub type Oid = [u8; 20];
 
 /// The token owner's login: a sealed suite constant (wire.ts SCENARIO_SEED → users[0]), not instance data.
@@ -255,6 +257,55 @@ impl Store {
 
     pub(crate) fn repos_write(&self) -> std::sync::RwLockWriteGuard<'_, BTreeMap<(String, String), RepoRef>> {
         self.repos.write().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum StoreError {
+    /// 422 `name already exists on this account` (git-client.ts:2096 matches `already exists`).
+    AlreadyExists,
+    NotFound,
+    /// 422: the named label does not exist in the repo.
+    UnknownLabel(String),
+}
+
+impl Store {
+    pub fn create_repo(&self, owner: &str, name: &str, description: &str, private: bool) -> Result<RepoRef, StoreError> {
+        let mut map = self.repos_write();
+        let key = (owner.to_string(), name.to_string());
+        if map.contains_key(&key) {
+            return Err(StoreError::AlreadyExists);
+        }
+        let repo = Arc::new(Mutex::new(Repo {
+            id: self.next_id(Kind::Repo),
+            owner: key.0.clone(),
+            name: key.1.clone(),
+            description: description.to_string(),
+            private,
+            default_branch: "main".to_string(),
+            refs: BTreeMap::new(),
+            objects: HashMap::new(),
+            labels: Vec::new(),
+            issues: Vec::new(),
+            pulls: Vec::new(),
+            last_number: 0,
+        }));
+        map.insert(key, repo.clone());
+        Ok(repo)
+    }
+
+    pub fn delete_repo(&self, owner: &str, name: &str) -> bool {
+        self.repos_write().remove(&(owner.to_string(), name.to_string())).is_some()
+    }
+
+    /// The owner's repos, by name (ascending).
+    pub fn list_repos(&self, owner: &str) -> Vec<RepoRef> {
+        self.repos_read().iter().filter(|((o, _), _)| o == owner).map(|(_, r)| r.clone()).collect()
+    }
+
+    pub fn repo_by_id(&self, id: u64) -> Option<RepoRef> {
+        // shortcut: linear scan (the suite makes ~100 repos); index by id if a profile shows it.
+        self.repos_read().values().find(|r| lock(r).id == id).cloned()
     }
 }
 
