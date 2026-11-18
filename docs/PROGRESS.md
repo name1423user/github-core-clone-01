@@ -14,7 +14,7 @@
 - [x] `src/store/` PR・git オブジェクト・ref の置き場（git-engineer と型を合わせる）
 - [x] router: 壊れた JSON → 400、共通エラーのヘルパ
 - [x] `cargo test` → `build.sh` → `grade.sh` → バイナリごとコミット
-- [ ] `/parallel` 第1波: rest・git・mcp を並列（2026-11-18 12:58 JST 開始。担当の成果は未コミットの可能性 → `git status` で確認し、`cargo test` が通ればコミット）
+- [ ] `/parallel` 第1波: rest・git・mcp を並列（2026-11-18 12:50 JST 開始。担当の成果は未コミットの可能性 → `git status` で確認し、`cargo test` が通ればコミット）
 - [ ] `/parallel` 第2波: graphql（REST・git の後）
 - [ ] 落ちたチェックの潰し込み → 120/120 → 0.3.0
 - [ ] perf
