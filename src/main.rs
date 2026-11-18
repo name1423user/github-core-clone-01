@@ -16,6 +16,9 @@ mod router;
 mod store;
 mod util;
 
+#[global_allocator]
+static ALLOC: util::alloc::Alloc = util::alloc::Alloc;
+
 use std::net::TcpListener;
 use std::process::exit;
 use std::thread;
