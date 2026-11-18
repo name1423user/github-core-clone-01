@@ -13,5 +13,5 @@
 - [x] `src/store/` repos / issues / labels / comments の操作関数
 - [x] `src/store/` PR・git オブジェクト・ref の置き場（git-engineer と型を合わせる）
 - [x] router: 壊れた JSON → 400、共通エラーのヘルパ
-- [ ] `cargo test` → `build.sh` → `grade.sh` → バイナリごとコミット
+- [x] `cargo test` → `build.sh` → `grade.sh` → バイナリごとコミット
 - [ ] `/parallel`（git・rest・graphql・mcp を1担当ずつ、細かいチェック単位で）
