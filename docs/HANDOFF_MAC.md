@@ -17,10 +17,15 @@
 - ところが、クラウドのセッションのトランスクリプトはそのコンテナの中にしか残らない。
   - 2026-11-18 の時点で、このコンテナで `bundle --dry-run` が拾えるのは今のセッションの分だけだった。
   - それより前のクラウドのセッション（`/kickoff`・`/parallel` など）の分はここに無い。
-- Mac でやること:
-  1. 最新の main を pull したリポジトリで `node $KIT/cli/makefun.mjs bundle --repo . --out /tmp/b.tgz --dry-run` を実行し、何件のセッションが拾われるか見る（Mac の Claude Code で作業した分、`--claude-desktop-dir` が拾う分）。
-  2. 拾われていないセッションがあれば、どこにあるか（claude.ai のクラウドセッションの履歴など）を確認する。持ってこられない場合は、次の提出までにどう扱うかを決める。
-- **これからのクラウドのセッションは、終わる前にその場で `bundle` を作って保存する**運用にするかも決める（コンテナが消えるとトランスクリプトも消える）。
+- **決めた方法（2026-11-18）: 各セッションの jsonl を Mac に集め、Mac で1つの束にする。**
+  1. 集める（各クラウドセッションの中で）: そのセッションに「`~/.claude/projects/` のこのセッションの `*.jsonl`（`subagents/agent-*.jsonl` も）を SendUserFile で送って。コミットはしないで」と頼む。届いたファイルを Mac の1つのフォルダ（例 `~/makefun-transcripts/<セッション名>/`）に保存する。
+     - このプロジェクトの対象セッション: 「開発開始」（11/17 22:14 UTC〜）、「Session start」（11/17 22:50 UTC〜）、「セッション引き継ぎ準備」（11/18 03:44 UTC〜。コードの大半）、「Perf 調整」（11/18 06:20 UTC〜。送付済み、終了時に最新版を再送）
+     - jsonl はメールアドレス等を含むので **Git に入れない**（リポジトリは public）。伏せるのは bundle が行う。
+  2. Mac で確認: 最新の main を pull したリポジトリで
+     `node $KIT/cli/makefun.mjs bundle --repo . --session ~/makefun-transcripts/*/*.jsonl ~/makefun-transcripts/*/subagents/*.jsonl --out /tmp/b.tgz --dry-run`
+     → セッション数と、counted lines の 30% 以上がカバーされるかを見る。Mac の Claude Code で作業した分は自動で拾われる。
+  3. 本番の束は提出直前に `--dry-run` を外して作る（最後のセッションの記録まで入れるため）。
+- **運用: これからのクラウドのセッションは、終える前に必ず自分の jsonl を SendUserFile で送る**（コンテナが消えると記録も消える）。
 
 ### 1-2. 提出（CLAUDE.md §7・docs/SUBMIT.md）
 - make.fun アカウントとウォレットの連携、署名、提出コマンドの実行。Claude は提出コマンドを実行しない。
