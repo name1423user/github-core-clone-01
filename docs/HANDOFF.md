@@ -9,7 +9,7 @@
 2. `CLAUDE.md` を読む（規約・持ち場・アーキテクチャの正本）。このファイルと `docs/PROGRESS.md` の作業キューも読む。
 3. キットが無ければ取る: `ls ../github-core-clone-01-kit || bash scripts/fetch-kit.sh`（sha256 照合 63 件 OK を確認）
 4. ツール: `rustup target add x86_64-unknown-linux-musl`（クラウドのコンテナは毎回入れ直しが必要）
-5. 台帳の照合（version-registry スキル）。版番号ファイルは **`Cargo.toml` の `version`**（いま 0.1.0、台帳も 0.1.0）。
+5. 台帳の照合（version-registry スキル）。版番号ファイルは **`Cargo.toml` の `version`**（いま 0.3.0、台帳も 0.3.0）。
    - 台帳 `ruria-versions-registry` は main で読み書き・main に直接 push（強制 push 禁止）。
    - 台帳に `vela 0.1.1` の未マージのコミットがあるが別プロジェクト。触らない。
 6. 作業ブランチの最新を取る: `git fetch origin && git checkout <指定の作業ブランチ> && git merge origin/main`

@@ -18,5 +18,5 @@
 - [x] `cargo test` → `build.sh` → `grade.sh` → バイナリごとコミット
 - [x] `/parallel` 第1波: rest・git・mcp を並列（2026-11-18 12:50 JST 開始。担当の成果は未コミットの可能性 → `git status` で確認し、`cargo test` が通ればコミット）
 - [x] `/parallel` 第2波: graphql（REST・git の後）
-- [x] 120/120（版上げ 0.3.0 はるりあの確認待ち）
+- [x] 120/120（0.3.0 に版上げ）
 - [ ] perf
