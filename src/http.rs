@@ -110,6 +110,7 @@ pub fn serve(listener: TcpListener, handler: fn(&Request) -> Response) {
         let Ok(stream) = stream else { continue };
         let _ = thread::Builder::new().stack_size(STACK_SIZE).spawn(move || {
             let _ = connection(stream, handler);
+            crate::util::alloc::flush();
         });
     }
 }
