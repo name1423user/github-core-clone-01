@@ -12,6 +12,6 @@
 - [x] `src/store/` 型と ID カウンタ・日時（MAKEFUN_TRIAL_NOW）・node_id
 - [x] `src/store/` repos / issues / labels / comments の操作関数
 - [ ] `src/store/` PR・git オブジェクト・ref の置き場（git-engineer と型を合わせる）
-- [ ] router: 壊れた JSON → 400、共通エラーのヘルパ
+- [x] router: 壊れた JSON → 400、共通エラーのヘルパ
 - [ ] `cargo test` → `build.sh` → `grade.sh` → バイナリごとコミット
 - [ ] `/parallel`（git・rest・graphql・mcp を1担当ずつ、細かいチェック単位で）
