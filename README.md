@@ -2,8 +2,8 @@
      バッジの URL は必ずテンプレのものを使う（下の3つは形の目安。OWNER/REPO は自分のものに）。 -->
 
 [![make.fun bounty](https://make.fun/badge/github-core-clone-01.svg)](https://make.fun/bounty/github-core-clone-01)
-[![rank](https://make.fun/badge/github-core-clone-01/OWNER/REPO/rank.svg)](https://make.fun/bounty/github-core-clone-01)
-[![reward](https://make.fun/badge/github-core-clone-01/OWNER/REPO/reward.svg)](https://make.fun/bounty/github-core-clone-01)
+[![rank](https://make.fun/badge/github-core-clone-01/name1423user/github-core-clone-01/rank.svg)](https://make.fun/bounty/github-core-clone-01)
+[![reward](https://make.fun/badge/github-core-clone-01/name1423user/github-core-clone-01/reward.svg)](https://make.fun/bounty/github-core-clone-01)
 
 # GitHub-compatible git forge
 
