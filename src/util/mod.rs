@@ -2,3 +2,5 @@
 //! 予定: json.rs（パース・シリアライズ、キーソート出力）＝リード、
 //!       sha1.rs・zlib.rs（inflate/deflate）＝git-engineer。
 pub mod json;
+pub mod sha1;
+pub mod zlib;

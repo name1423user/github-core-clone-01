@@ -9,6 +9,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 mod issues;
+mod objects;
+#[allow(unused_imports)] // used by git/rest once they land
+pub use objects::*;
 
 pub type Oid = [u8; 20];
 
@@ -267,6 +270,8 @@ pub enum StoreError {
     NotFound,
     /// 422: the named label does not exist in the repo.
     UnknownLabel(String),
+    /// 409 (stale contents sha) / 405 (merge conflict).
+    Conflict,
 }
 
 impl Store {
