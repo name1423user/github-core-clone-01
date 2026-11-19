@@ -313,114 +313,7 @@ pub fn gunzip(input: &[u8]) -> Result<Vec<u8>, String> {
 }
 
 /// 有効な zlib ストリームを出す（stored ブロックのみ。速度優先）。
-/// zlib stream: LZ77 + fixed Huffman, or stored blocks when that comes out smaller (incompressible data).
-/// Smaller packs mean fewer bytes for the client to receive and checksum on every clone.
 pub fn deflate(input: &[u8]) -> Vec<u8> {
-    let fixed = deflate_fixed(input);
-    let stored = deflate_stored(input);
-    if fixed.len() < stored.len() { fixed } else { stored }
-}
-
-struct BitW {
-    out: Vec<u8>,
-    acc: u64,
-    n: u32,
-}
-
-impl BitW {
-    fn put(&mut self, v: u32, k: u32) {
-        self.acc |= (v as u64) << self.n;
-        self.n += k;
-        while self.n >= 8 {
-            self.out.push(self.acc as u8);
-            self.acc >>= 8;
-            self.n -= 8;
-        }
-    }
-    /// Huffman codes go out most-significant bit first.
-    fn huff(&mut self, code: u32, len: u32) {
-        self.put(code.reverse_bits() >> (32 - len), len)
-    }
-    fn lit(&mut self, v: u32) {
-        match v {
-            0..=143 => self.huff(0x30 + v, 8),
-            144..=255 => self.huff(0x190 + v - 144, 9),
-            256..=279 => self.huff(v - 256, 7),
-            _ => self.huff(0xc0 + v - 280, 8),
-        }
-    }
-    fn matched(&mut self, len: usize, dist: usize) {
-        let s = LBASE.iter().rposition(|&b| b as usize <= len).unwrap();
-        self.lit(257 + s as u32);
-        self.put((len - LBASE[s] as usize) as u32, LEXT[s] as u32);
-        let d = DBASE.iter().rposition(|&b| b as usize <= dist).unwrap();
-        self.huff(d as u32, 5);
-        self.put((dist - DBASE[d] as usize) as u32, DEXT[d] as u32);
-    }
-}
-
-fn deflate_fixed(input: &[u8]) -> Vec<u8> {
-    const NONE: u32 = u32::MAX;
-    let n = input.len();
-    let mut w = BitW { out: Vec::with_capacity(n / 2 + 16), acc: 0, n: 0 };
-    w.out.extend_from_slice(&[0x78, 0x01]);
-    w.put(1, 1); // BFINAL
-    w.put(1, 2); // BTYPE = fixed Huffman
-    let mut head = vec![NONE; 1 << 12];
-    let mut prev = vec![NONE; n];
-    let hash = |i: usize| ((input[i] as u32) << 16 | (input[i + 1] as u32) << 8 | input[i + 2] as u32).wrapping_mul(2_654_435_761) >> 20;
-    let insert = |i: usize, head: &mut [u32], prev: &mut [u32]| {
-        if i + 3 <= n {
-            let h = hash(i) as usize;
-            prev[i] = head[h];
-            head[h] = i as u32;
-        }
-    };
-    let mut i = 0;
-    while i < n {
-        let (mut best, mut dist) = (0, 0);
-        if i + 3 <= n {
-            let mut cand = head[hash(i) as usize];
-            let max = (n - i).min(258);
-            let mut chain = 32;
-            while cand != NONE && chain > 0 {
-                let c = cand as usize;
-                if i - c > 32_768 {
-                    break;
-                }
-                let l = input[c..].iter().zip(&input[i..i + max]).take_while(|(a, b)| a == b).count();
-                if l > best {
-                    best = l;
-                    dist = i - c;
-                    if l == max {
-                        break;
-                    }
-                }
-                cand = prev[c];
-                chain -= 1;
-            }
-        }
-        if best >= 3 {
-            w.matched(best, dist);
-            for j in i..i + best {
-                insert(j, &mut head, &mut prev);
-            }
-            i += best;
-        } else {
-            w.lit(input[i] as u32);
-            insert(i, &mut head, &mut prev);
-            i += 1;
-        }
-    }
-    w.lit(256);
-    if w.n > 0 {
-        w.out.push(w.acc as u8);
-    }
-    w.out.extend_from_slice(&adler32(input).to_be_bytes());
-    w.out
-}
-
-fn deflate_stored(input: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(input.len() + input.len() / 65535 * 5 + 11);
     out.extend_from_slice(&[0x78, 0x01]);
     let mut chunks = input.chunks(65535).peekable();
@@ -441,20 +334,6 @@ fn deflate_stored(input: &[u8]) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn fixed_huffman_roundtrip_and_shrinks() {
-        let text: Vec<u8> = (0..3000).flat_map(|i| format!("line {} of some commit text abc\n", i % 37).into_bytes()).collect();
-        let cases: Vec<Vec<u8>> = vec![vec![], b"a".to_vec(), b"abcabcabcabcabc".to_vec(), vec![7u8; 100_000], noise(5000), text.clone()];
-        for c in &cases {
-            let z = deflate(c);
-            assert_eq!(inflate(&z).unwrap().0, *c, "len {}", c.len());
-            let f = deflate_fixed(c);
-            assert_eq!(inflate(&f).unwrap().0, *c, "fixed len {}", c.len());
-        }
-        assert!(deflate(&text).len() < text.len() / 4);
-        assert!(deflate(&noise(5000)).len() <= 5000 + 16, "incompressible falls back to stored");
-    }
 
     fn noise(n: usize) -> Vec<u8> {
         let mut x = 0x12345678u32;
