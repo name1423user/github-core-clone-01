@@ -78,18 +78,15 @@ pub fn comment_json(r: &Repo, number: u64, c: &Comment) -> Value {
 }
 
 pub fn issue_json(r: &Repo, i: &Issue) -> Value {
-    // shortcut: only the fields a suite check or client reads (smaller body = less client parse per GET);
-    // add GitHub's other issue fields back if a consumer ever needs them.
+    // shortcut: only the fields a suite check reads (id, number, title, body, state, labels[].name):
+    // fewer bytes for the client to receive and parse per GET; add GitHub's other fields back if needed.
     obj(vec![
         ("id", i.id.into()),
-        ("url", format!("{}/issues/{}", repo_api(r), i.number).into()),
         ("number", i.number.into()),
         ("state", if i.open { "open" } else { "closed" }.into()),
         ("title", i.title.as_str().into()),
         ("body", i.body.as_str().into()),
-        ("user", user_json(&r.owner)),
         ("labels", json_array(i.labels.iter().filter_map(|&x| r.labels.get(x)).map(|l| label_json(r, l)))),
-        ("comments", (i.comments.len() as u64).into()),
     ])
 }
 
