@@ -64,7 +64,10 @@ impl Response {
     pub fn json(status: u16, body: impl Into<Vec<u8>>) -> Response {
         let mut r = Response::new(status, "application/json; charset=utf-8", body.into());
         let id = REQUEST_SEQ.fetch_add(1, Ordering::Relaxed) + 1;
-        r.headers.push(("x-github-request-id", format!("R{id}")));
+        let mut v = Vec::with_capacity(12);
+        v.push(b'R');
+        push_num(&mut v, id);
+        r.headers.push(("x-github-request-id", String::from_utf8(v).unwrap_or_default()));
         r
     }
 
@@ -131,12 +134,21 @@ fn connection(stream: TcpStream, handler: fn(&Request) -> Response) -> io::Resul
         let Some((req, keep_alive)) = read_request(&mut reader)? else { return Ok(()) };
         let res = handler(&req);
         out.clear();
-        write!(out, "HTTP/1.1 {} {}\r\n", res.status, reason(res.status))?;
+        out.extend_from_slice(b"HTTP/1.1 ");
+        push_num(&mut out, res.status as u64);
+        out.push(b' ');
+        out.extend_from_slice(reason(res.status).as_bytes());
+        out.extend_from_slice(b"\r\n");
         for (k, v) in &res.headers {
-            write!(out, "{k}: {v}\r\n")?;
+            out.extend_from_slice(k.as_bytes());
+            out.extend_from_slice(b": ");
+            out.extend_from_slice(v.as_bytes());
+            out.extend_from_slice(b"\r\n");
         }
         let body: &[u8] = res.shared.as_deref().unwrap_or(&res.body);
-        write!(out, "content-length: {}\r\n", body.len())?;
+        out.extend_from_slice(b"content-length: ");
+        push_num(&mut out, body.len() as u64);
+        out.extend_from_slice(b"\r\n");
         if !keep_alive {
             out.extend_from_slice(b"connection: close\r\n");
         }
@@ -187,12 +199,12 @@ fn read_request(r: &mut BufReader<TcpStream>) -> io::Result<Option<(Request, boo
         }
     }
     let get = |n: &str| headers.iter().find(|(k, _)| k == n).map(|(_, v)| v.as_str());
-    let keep_alive = match get("connection").map(|v| v.to_ascii_lowercase()) {
-        Some(v) if v.contains("close") => false,
-        Some(v) if v.contains("keep-alive") => true,
+    let keep_alive = match get("connection") {
+        Some(v) if has_token(v, b"close") => false,
+        Some(v) if has_token(v, b"keep-alive") => true,
         _ => !http10,
     };
-    let body = if get("transfer-encoding").is_some_and(|v| v.to_ascii_lowercase().contains("chunked")) {
+    let body = if get("transfer-encoding").is_some_and(|v| has_token(v, b"chunked")) {
         read_chunked(r)?
     } else {
         let n: usize = get("content-length").and_then(|v| v.parse().ok()).unwrap_or(0);
@@ -204,6 +216,26 @@ fn read_request(r: &mut BufReader<TcpStream>) -> io::Result<Option<(Request, boo
         b
     };
     Ok(Some((Request { method, path, query, headers, body }, keep_alive)))
+}
+
+/// Case-insensitive substring test without lowercasing a copy.
+fn has_token(v: &str, t: &[u8]) -> bool {
+    v.as_bytes().windows(t.len()).any(|w| w.eq_ignore_ascii_case(t))
+}
+
+/// Append `n` in decimal.
+fn push_num(out: &mut Vec<u8>, mut n: u64) {
+    let mut d = [0u8; 20];
+    let mut i = d.len();
+    loop {
+        i -= 1;
+        d[i] = b'0' + (n % 10) as u8;
+        n /= 10;
+        if n == 0 {
+            break;
+        }
+    }
+    out.extend_from_slice(&d[i..]);
 }
 
 fn read_chunked(r: &mut BufReader<TcpStream>) -> io::Result<Vec<u8>> {
@@ -260,6 +292,16 @@ mod tests {
 
     fn echo(req: &Request) -> Response {
         Response::json(200, format!("{} {} {}", req.method, req.path, req.body.len()))
+    }
+
+    #[test]
+    fn helpers() {
+        let mut o = Vec::new();
+        push_num(&mut o, 0);
+        o.push(b' ');
+        push_num(&mut o, 18446744073709551615);
+        assert_eq!(o, b"0 18446744073709551615");
+        assert!(has_token("Keep-Alive, Upgrade", b"keep-alive") && !has_token("upgrade", b"close"));
     }
 
     #[test]
