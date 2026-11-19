@@ -31,11 +31,11 @@ pub fn handle(req: &Request, parts: &[&str]) -> Response {
             Some("git-upload-pack") => {
                 let v2 = req.header("git-protocol").is_some_and(|v| v.split(':').any(|p| p.trim() == "version=2"));
                 let body = if v2 { advertise_v2() } else { advertise_v0(&lock(&repo), "git-upload-pack") };
-                Response::new(200, "application/x-git-upload-pack-advertisement", body).with_header("cache-control", "no-cache")
+                Response::new(200, "application/x-git-upload-pack-advertisement", body)
             }
             Some("git-receive-pack") => {
                 let body = advertise_v0(&lock(&repo), "git-receive-pack");
-                Response::new(200, "application/x-git-receive-pack-advertisement", body).with_header("cache-control", "no-cache")
+                Response::new(200, "application/x-git-receive-pack-advertisement", body)
             }
             _ => Response::new(403, "text/plain", b"dumb HTTP is not supported\n".to_vec()),
         },
