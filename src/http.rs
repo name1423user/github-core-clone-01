@@ -140,9 +140,23 @@ fn quickack(stream: &TcpStream) {
     unsafe { setsockopt(stream.as_raw_fd(), IPPROTO_TCP, TCP_QUICKACK, &on as *const i32 as *const _, 4) };
 }
 
+/// Larger socket buffers so a big request or response moves in fewer windows. Best effort.
+fn bufsizes(stream: &TcpStream) {
+    use std::os::fd::AsRawFd;
+    const SOL_SOCKET: i32 = 1;
+    const SO_SNDBUF: i32 = 7;
+    const SO_RCVBUF: i32 = 8;
+    let size: i32 = 256 << 10;
+    for opt in [SO_SNDBUF, SO_RCVBUF] {
+        // SAFETY: valid fd for the stream's lifetime; pointer/len describe a live i32.
+        unsafe { setsockopt(stream.as_raw_fd(), SOL_SOCKET, opt, &size as *const i32 as *const _, 4) };
+    }
+}
+
 fn connection(stream: TcpStream, handler: fn(&Request) -> Response) -> io::Result<()> {
     stream.set_nodelay(true)?;
     quickack(&stream);
+    bufsizes(&stream);
     let mut writer = stream.try_clone()?;
     let mut reader = BufReader::with_capacity(64 << 10, stream);
     let mut out = Vec::with_capacity(4096);
