@@ -132,7 +132,7 @@ pub fn peel(repo: &Repo, mut oid: Oid) -> Oid {
 fn advertise_v2() -> Vec<u8> {
     let mut out = Vec::with_capacity(96);
     pkt_str(&mut out, "version 2\n");
-    pkt_str(&mut out, "ls-refs=unborn\n");
+    pkt_str(&mut out, "ls-refs\n");
     pkt_str(&mut out, "fetch=shallow\n");
     out.extend_from_slice(b"0000");
     out
