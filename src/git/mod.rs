@@ -134,6 +134,7 @@ fn advertise_v2() -> Vec<u8> {
     pkt_str(&mut out, "version 2\n");
     pkt_str(&mut out, "ls-refs=unborn\n");
     pkt_str(&mut out, "fetch=shallow\n");
+    pkt_str(&mut out, "object-format=sha1\n");
     out.extend_from_slice(b"0000");
     out
 }
@@ -144,9 +145,9 @@ fn advertise_v0(repo: &Repo, service: &str) -> Vec<u8> {
     out.extend_from_slice(b"0000");
     let target = head_target(repo);
     let caps = if service == "git-receive-pack" {
-        "report-status delete-refs side-band-64k ofs-delta".to_string()
+        "report-status delete-refs side-band-64k ofs-delta object-format=sha1".to_string()
     } else {
-        format!("multi_ack_detailed side-band-64k thin-pack ofs-delta shallow no-progress symref=HEAD:{target}")
+        format!("multi_ack_detailed side-band-64k thin-pack ofs-delta shallow no-progress symref=HEAD:{target} object-format=sha1")
     };
     let mut lines: Vec<(Oid, String)> = Vec::new();
     if service == "git-upload-pack" {
