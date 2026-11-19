@@ -49,20 +49,25 @@ pub struct Response {
     pub status: u16,
     pub headers: Vec<(&'static str, String)>,
     pub body: Vec<u8>,
+    /// Pre-rendered body shared with a cache; written instead of `body` without copying it first.
+    pub shared: Option<std::sync::Arc<[u8]>>,
 }
 
 static REQUEST_SEQ: AtomicU64 = AtomicU64::new(0);
 
 impl Response {
     pub fn new(status: u16, content_type: &str, body: Vec<u8>) -> Response {
-        Response { status, headers: vec![("content-type", content_type.to_string())], body }
+        Response { status, headers: vec![("content-type", content_type.to_string())], body, shared: None }
     }
 
     /// A JSON reply; every one carries a non-empty X-GitHub-Request-Id (RULES: wire contract).
     pub fn json(status: u16, body: impl Into<Vec<u8>>) -> Response {
-        let mut r = Response::new(status, "application/json; charset=utf-8", body.into());
+        let mut r = Response::new(status, "application/json", body.into());
         let id = REQUEST_SEQ.fetch_add(1, Ordering::Relaxed) + 1;
-        r.headers.push(("x-github-request-id", format!("R{id}")));
+        let mut v = Vec::with_capacity(12);
+        v.push(b'R');
+        push_num(&mut v, id);
+        r.headers.push(("x-github-request-id", String::from_utf8(v).unwrap_or_default()));
         r
     }
 
@@ -77,6 +82,11 @@ impl Response {
         crate::util::json::write_str(&mut b, message);
         b.push_str(",\"documentation_url\":\"https://docs.github.com/rest\"}");
         Response::json(status, b)
+    }
+
+    pub fn with_shared(mut self, body: std::sync::Arc<[u8]>) -> Response {
+        self.shared = Some(body);
+        self
     }
 
     pub fn with_header(mut self, name: &'static str, value: impl Into<String>) -> Response {
@@ -115,8 +125,38 @@ pub fn serve(listener: TcpListener, handler: fn(&Request) -> Response) {
     }
 }
 
+unsafe extern "C" {
+    fn setsockopt(fd: i32, level: i32, name: i32, value: *const std::ffi::c_void, len: u32) -> i32;
+}
+
+/// Ask the kernel (or gVisor's netstack) to ACK at once instead of delaying ACKs on this socket.
+/// Best effort: a failure changes nothing.
+fn quickack(stream: &TcpStream) {
+    use std::os::fd::AsRawFd;
+    const IPPROTO_TCP: i32 = 6;
+    const TCP_QUICKACK: i32 = 12;
+    let on: i32 = 1;
+    // SAFETY: valid fd for the stream's lifetime; pointer/len describe a live i32.
+    unsafe { setsockopt(stream.as_raw_fd(), IPPROTO_TCP, TCP_QUICKACK, &on as *const i32 as *const _, 4) };
+}
+
+/// Larger socket buffers so a big request or response moves in fewer windows. Best effort.
+fn bufsizes(stream: &TcpStream) {
+    use std::os::fd::AsRawFd;
+    const SOL_SOCKET: i32 = 1;
+    const SO_SNDBUF: i32 = 7;
+    const SO_RCVBUF: i32 = 8;
+    let size: i32 = 256 << 10;
+    for opt in [SO_SNDBUF, SO_RCVBUF] {
+        // SAFETY: valid fd for the stream's lifetime; pointer/len describe a live i32.
+        unsafe { setsockopt(stream.as_raw_fd(), SOL_SOCKET, opt, &size as *const i32 as *const _, 4) };
+    }
+}
+
 fn connection(stream: TcpStream, handler: fn(&Request) -> Response) -> io::Result<()> {
     stream.set_nodelay(true)?;
+    quickack(&stream);
+    bufsizes(&stream);
     let mut writer = stream.try_clone()?;
     let mut reader = BufReader::with_capacity(64 << 10, stream);
     let mut out = Vec::with_capacity(4096);
@@ -124,17 +164,27 @@ fn connection(stream: TcpStream, handler: fn(&Request) -> Response) -> io::Resul
         let Some((req, keep_alive)) = read_request(&mut reader)? else { return Ok(()) };
         let res = handler(&req);
         out.clear();
-        write!(out, "HTTP/1.1 {} {}\r\n", res.status, reason(res.status))?;
+        out.extend_from_slice(b"HTTP/1.1 ");
+        push_num(&mut out, res.status as u64);
+        out.push(b' ');
+        out.extend_from_slice(reason(res.status).as_bytes());
+        out.extend_from_slice(b"\r\n");
         for (k, v) in &res.headers {
-            write!(out, "{k}: {v}\r\n")?;
+            out.extend_from_slice(k.as_bytes());
+            out.extend_from_slice(b": ");
+            out.extend_from_slice(v.as_bytes());
+            out.extend_from_slice(b"\r\n");
         }
-        write!(out, "content-length: {}\r\n", res.body.len())?;
+        let body: &[u8] = res.shared.as_deref().unwrap_or(&res.body);
+        out.extend_from_slice(b"content-length: ");
+        push_num(&mut out, body.len() as u64);
+        out.extend_from_slice(b"\r\n");
         if !keep_alive {
             out.extend_from_slice(b"connection: close\r\n");
         }
         out.extend_from_slice(b"\r\n");
         if req.method != "HEAD" {
-            out.extend_from_slice(&res.body);
+            out.extend_from_slice(body);
         }
         writer.write_all(&out)?;
         if !keep_alive {
@@ -179,12 +229,12 @@ fn read_request(r: &mut BufReader<TcpStream>) -> io::Result<Option<(Request, boo
         }
     }
     let get = |n: &str| headers.iter().find(|(k, _)| k == n).map(|(_, v)| v.as_str());
-    let keep_alive = match get("connection").map(|v| v.to_ascii_lowercase()) {
-        Some(v) if v.contains("close") => false,
-        Some(v) if v.contains("keep-alive") => true,
+    let keep_alive = match get("connection") {
+        Some(v) if has_token(v, b"close") => false,
+        Some(v) if has_token(v, b"keep-alive") => true,
         _ => !http10,
     };
-    let body = if get("transfer-encoding").is_some_and(|v| v.to_ascii_lowercase().contains("chunked")) {
+    let body = if get("transfer-encoding").is_some_and(|v| has_token(v, b"chunked")) {
         read_chunked(r)?
     } else {
         let n: usize = get("content-length").and_then(|v| v.parse().ok()).unwrap_or(0);
@@ -196,6 +246,26 @@ fn read_request(r: &mut BufReader<TcpStream>) -> io::Result<Option<(Request, boo
         b
     };
     Ok(Some((Request { method, path, query, headers, body }, keep_alive)))
+}
+
+/// Case-insensitive substring test without lowercasing a copy.
+fn has_token(v: &str, t: &[u8]) -> bool {
+    v.as_bytes().windows(t.len()).any(|w| w.eq_ignore_ascii_case(t))
+}
+
+/// Append `n` in decimal.
+fn push_num(out: &mut Vec<u8>, mut n: u64) {
+    let mut d = [0u8; 20];
+    let mut i = d.len();
+    loop {
+        i -= 1;
+        d[i] = b'0' + (n % 10) as u8;
+        n /= 10;
+        if n == 0 {
+            break;
+        }
+    }
+    out.extend_from_slice(&d[i..]);
 }
 
 fn read_chunked(r: &mut BufReader<TcpStream>) -> io::Result<Vec<u8>> {
@@ -252,6 +322,16 @@ mod tests {
 
     fn echo(req: &Request) -> Response {
         Response::json(200, format!("{} {} {}", req.method, req.path, req.body.len()))
+    }
+
+    #[test]
+    fn helpers() {
+        let mut o = Vec::new();
+        push_num(&mut o, 0);
+        o.push(b' ');
+        push_num(&mut o, 18446744073709551615);
+        assert_eq!(o, b"0 18446744073709551615");
+        assert!(has_token("Keep-Alive, Upgrade", b"keep-alive") && !has_token("upgrade", b"close"));
     }
 
     #[test]

@@ -31,16 +31,16 @@ pub fn handle(req: &Request, parts: &[&str]) -> Response {
             Some("git-upload-pack") => {
                 let v2 = req.header("git-protocol").is_some_and(|v| v.split(':').any(|p| p.trim() == "version=2"));
                 let body = if v2 { advertise_v2() } else { advertise_v0(&lock(&repo), "git-upload-pack") };
-                Response::new(200, "application/x-git-upload-pack-advertisement", body).with_header("cache-control", "no-cache")
+                Response::new(200, "application/x-git-upload-pack-advertisement", body)
             }
             Some("git-receive-pack") => {
                 let body = advertise_v0(&lock(&repo), "git-receive-pack");
-                Response::new(200, "application/x-git-receive-pack-advertisement", body).with_header("cache-control", "no-cache")
+                Response::new(200, "application/x-git-receive-pack-advertisement", body)
             }
             _ => Response::new(403, "text/plain", b"dumb HTTP is not supported\n".to_vec()),
         },
         ("POST", ["git-upload-pack"]) => match upload_pack::handle(&repo, body) {
-            Ok(b) => Response::new(200, "application/x-git-upload-pack-result", b),
+            Ok(b) => Response::new(200, "application/x-git-upload-pack-result", Vec::new()).with_shared(b),
             Err(e) => Response::new(400, "text/plain", e.into_bytes()),
         },
         ("POST", ["git-receive-pack"]) => match receive_pack::handle(&repo, body) {
@@ -134,7 +134,6 @@ fn advertise_v2() -> Vec<u8> {
     pkt_str(&mut out, "version 2\n");
     pkt_str(&mut out, "ls-refs=unborn\n");
     pkt_str(&mut out, "fetch=shallow\n");
-    pkt_str(&mut out, "object-format=sha1\n");
     out.extend_from_slice(b"0000");
     out
 }
@@ -145,9 +144,9 @@ fn advertise_v0(repo: &Repo, service: &str) -> Vec<u8> {
     out.extend_from_slice(b"0000");
     let target = head_target(repo);
     let caps = if service == "git-receive-pack" {
-        "report-status delete-refs side-band-64k quiet ofs-delta object-format=sha1".to_string()
+        "report-status delete-refs side-band-64k ofs-delta".to_string()
     } else {
-        format!("multi_ack_detailed side-band-64k thin-pack ofs-delta shallow no-progress symref=HEAD:{target} object-format=sha1")
+        format!("multi_ack_detailed side-band-64k thin-pack ofs-delta shallow no-progress symref=HEAD:{target}")
     };
     let mut lines: Vec<(Oid, String)> = Vec::new();
     if service == "git-upload-pack" {

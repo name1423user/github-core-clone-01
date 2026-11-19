@@ -1,6 +1,6 @@
 [package]
 name = "forge"
-version = "0.3.0"          # 版番号ファイル（台帳 ruria-versions-registry と照合する正本）
+version = "0.4.1"          # 版番号ファイル（台帳 ruria-versions-registry と照合する正本）
 edition = "2024"
 license = "MIT"
 publish = false

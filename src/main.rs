@@ -61,7 +61,9 @@ fn wait_for_done(host: &str, env_port: u16) {
                 return;
             }
         }
-        thread::sleep(retry_delay(attempt));
+        // Each poll is a new TCP connection the env's event loop (shared with the bench client) must
+        // serve; the env keeps serving after done until SIGTERM, so a slow poll only delays our exit.
+        thread::sleep(if attempt >= 3 { Duration::from_secs(10) } else { retry_delay(attempt) });
     }
 }
 

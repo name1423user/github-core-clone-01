@@ -6,7 +6,7 @@ use crate::util::sha1::hex;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex, OnceLock};
 
-pub fn handle(repo: &RepoRef, body: &[u8]) -> Result<Vec<u8>, String> {
+pub fn handle(repo: &RepoRef, body: &[u8]) -> Result<Arc<[u8]>, String> {
     let mut pos = 0;
     let mut command: Option<&[u8]> = None;
     // capability lines up to the delimiter, then argument lines up to flush
@@ -31,7 +31,7 @@ pub fn handle(repo: &RepoRef, body: &[u8]) -> Result<Vec<u8>, String> {
         }
     }
     match command {
-        Some(b"ls-refs") => Ok(ls_refs(repo, &args)),
+        Some(b"ls-refs") => Ok(Arc::from(ls_refs(repo, &args))),
         Some(b"fetch") => fetch(repo, &args, &body[args_start..pos]),
         _ => Err("unknown or missing command".into()),
     }
@@ -45,14 +45,14 @@ struct FetchArgs {
     done: bool,
 }
 
-type Cache = Mutex<HashMap<(u64, Vec<u8>), Arc<OnceLock<Arc<Vec<u8>>>>>>;
+type Cache = Mutex<HashMap<(u64, Vec<u8>), Arc<OnceLock<Arc<[u8]>>>>>;
 
 fn cache() -> &'static Cache {
     static C: OnceLock<Cache> = OnceLock::new();
     C.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn fetch(repo: &RepoRef, args: &[&[u8]], raw_args: &[u8]) -> Result<Vec<u8>, String> {
+fn fetch(repo: &RepoRef, args: &[&[u8]], raw_args: &[u8]) -> Result<Arc<[u8]>, String> {
     let mut a = FetchArgs { wants: Vec::new(), haves: Vec::new(), shallow: Vec::new(), depth: None, done: false };
     for l in args {
         let (k, v) = match l.iter().position(|&b| b == b' ') {
@@ -75,7 +75,7 @@ fn fetch(repo: &RepoRef, args: &[&[u8]], raw_args: &[u8]) -> Result<Vec<u8>, Str
         (g.id, a.wants.iter().chain(&a.haves).all(|o| g.objects.contains_key(o)))
     };
     if !cacheable {
-        return Ok(build(repo, &a));
+        return Ok(Arc::from(build(repo, &a)));
     }
     let cell = {
         let mut c = cache().lock().unwrap_or_else(|e| e.into_inner());
@@ -85,7 +85,7 @@ fn fetch(repo: &RepoRef, args: &[&[u8]], raw_args: &[u8]) -> Result<Vec<u8>, Str
         c.entry((id, raw_args.to_vec())).or_default().clone()
     };
     // Concurrent identical requests wait here for the first one's result.
-    Ok(cell.get_or_init(|| Arc::new(build(repo, &a))).as_ref().clone())
+    Ok(cell.get_or_init(|| Arc::from(build(repo, &a))).clone())
 }
 
 fn build(repo: &RepoRef, a: &FetchArgs) -> Vec<u8> {
