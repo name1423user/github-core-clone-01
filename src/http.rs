@@ -157,8 +157,8 @@ fn connection(stream: TcpStream, handler: fn(&Request) -> Response) -> io::Resul
     stream.set_nodelay(true)?;
     quickack(&stream);
     bufsizes(&stream);
-    // One fd for both directions (&TcpStream is Read + Write): no dup() per connection.
-    let mut reader = BufReader::with_capacity(64 << 10, &stream);
+    let mut writer = stream.try_clone()?;
+    let mut reader = BufReader::with_capacity(64 << 10, stream);
     let mut out = Vec::with_capacity(4096);
     loop {
         let Some((req, keep_alive)) = read_request(&mut reader)? else { return Ok(()) };
@@ -186,7 +186,7 @@ fn connection(stream: TcpStream, handler: fn(&Request) -> Response) -> io::Resul
         if req.method != "HEAD" {
             out.extend_from_slice(body);
         }
-        (&stream).write_all(&out)?;
+        writer.write_all(&out)?;
         if !keep_alive {
             return Ok(());
         }
@@ -194,7 +194,7 @@ fn connection(stream: TcpStream, handler: fn(&Request) -> Response) -> io::Resul
 }
 
 /// Read one request; Ok(None) on a clean close before a request line.
-fn read_request<R: BufRead>(r: &mut R) -> io::Result<Option<(Request, bool)>> {
+fn read_request(r: &mut BufReader<TcpStream>) -> io::Result<Option<(Request, bool)>> {
     let mut line = String::new();
     // Tolerate stray CRLFs between keep-alive requests.
     loop {
@@ -268,7 +268,7 @@ fn push_num(out: &mut Vec<u8>, mut n: u64) {
     out.extend_from_slice(&d[i..]);
 }
 
-fn read_chunked<R: BufRead>(r: &mut R) -> io::Result<Vec<u8>> {
+fn read_chunked(r: &mut BufReader<TcpStream>) -> io::Result<Vec<u8>> {
     let mut body = Vec::new();
     let mut line = String::new();
     loop {
