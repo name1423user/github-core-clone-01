@@ -125,8 +125,24 @@ pub fn serve(listener: TcpListener, handler: fn(&Request) -> Response) {
     }
 }
 
+unsafe extern "C" {
+    fn setsockopt(fd: i32, level: i32, name: i32, value: *const std::ffi::c_void, len: u32) -> i32;
+}
+
+/// Ask the kernel (or gVisor's netstack) to ACK at once instead of delaying ACKs on this socket.
+/// Best effort: a failure changes nothing.
+fn quickack(stream: &TcpStream) {
+    use std::os::fd::AsRawFd;
+    const IPPROTO_TCP: i32 = 6;
+    const TCP_QUICKACK: i32 = 12;
+    let on: i32 = 1;
+    // SAFETY: valid fd for the stream's lifetime; pointer/len describe a live i32.
+    unsafe { setsockopt(stream.as_raw_fd(), IPPROTO_TCP, TCP_QUICKACK, &on as *const i32 as *const _, 4) };
+}
+
 fn connection(stream: TcpStream, handler: fn(&Request) -> Response) -> io::Result<()> {
     stream.set_nodelay(true)?;
+    quickack(&stream);
     let mut writer = stream.try_clone()?;
     let mut reader = BufReader::with_capacity(64 << 10, stream);
     let mut out = Vec::with_capacity(4096);
