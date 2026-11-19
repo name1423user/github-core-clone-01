@@ -62,7 +62,7 @@ impl Response {
 
     /// A JSON reply; every one carries a non-empty X-GitHub-Request-Id (RULES: wire contract).
     pub fn json(status: u16, body: impl Into<Vec<u8>>) -> Response {
-        let mut r = Response::new(status, "application/json; charset=utf-8", body.into());
+        let mut r = Response::new(status, "application/json", body.into());
         let id = REQUEST_SEQ.fetch_add(1, Ordering::Relaxed) + 1;
         let mut v = Vec::with_capacity(12);
         v.push(b'R');
