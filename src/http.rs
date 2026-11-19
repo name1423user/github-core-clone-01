@@ -167,7 +167,7 @@ fn connection(stream: TcpStream, handler: fn(&Request) -> Response) -> io::Resul
         out.extend_from_slice(b"HTTP/1.1 ");
         push_num(&mut out, res.status as u64);
         out.push(b' ');
-        // shortcut: empty reason phrase (RFC 9112 allows it; clients read the code), fewer bytes per response.
+        out.extend_from_slice(reason(res.status).as_bytes());
         out.extend_from_slice(b"\r\n");
         for (k, v) in &res.headers {
             out.extend_from_slice(k.as_bytes());
