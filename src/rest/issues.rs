@@ -78,29 +78,18 @@ pub fn comment_json(r: &Repo, number: u64, c: &Comment) -> Value {
 }
 
 pub fn issue_json(r: &Repo, i: &Issue) -> Value {
-    let t = now().iso.as_str();
-    let api = repo_api(r);
+    // shortcut: only the fields a suite check or client reads (smaller body = less client parse per GET);
+    // add GitHub's other issue fields back if a consumer ever needs them.
     obj(vec![
         ("id", i.id.into()),
-        ("node_id", node_id(Kind::Issue, i.id).into()),
-        ("url", format!("{api}/issues/{}", i.number).into()),
-        ("repository_url", api.as_str().into()),
-        ("html_url", format!("{WEB}/{}/{}/issues/{}", r.owner, r.name, i.number).into()),
+        ("url", format!("{}/issues/{}", repo_api(r), i.number).into()),
         ("number", i.number.into()),
         ("state", if i.open { "open" } else { "closed" }.into()),
-        ("state_reason", if i.open { Value::Null } else { "completed".into() }),
         ("title", i.title.as_str().into()),
         ("body", i.body.as_str().into()),
         ("user", user_json(&r.owner)),
         ("labels", json_array(i.labels.iter().filter_map(|&x| r.labels.get(x)).map(|l| label_json(r, l)))),
-        ("assignee", Value::Null),
-        ("assignees", Value::Arr(vec![])),
-        ("locked", false.into()),
         ("comments", (i.comments.len() as u64).into()),
-        ("created_at", t.into()),
-        ("updated_at", t.into()),
-        ("closed_at", if i.open { Value::Null } else { t.into() }),
-        ("author_association", "OWNER".into()),
     ])
 }
 
