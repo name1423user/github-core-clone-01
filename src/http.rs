@@ -1,15 +1,21 @@
-//! HTTP/1.1 server on std only: one thread per connection, keep-alive, Content-Length and chunked bodies.
+//! HTTP/1.1 server on std only: a few epoll event-loop threads (Go's netpoller model), keep-alive,
+//! Content-Length and chunked bodies. Few threads matter under gVisor, where waking or switching
+//! between many application threads is costly (the 50-connection clone bench).
 //! 持ち場: リード。インターフェースは Request を受けて Response を返すだけ。
 
-use std::io::{self, BufRead, BufReader, Read, Write};
+use std::io::{self, BufRead, Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::os::fd::AsRawFd;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 
 /// Largest request body accepted (a push of the clone history is well under this).
 const MAX_BODY: usize = 256 << 20;
-/// Per-connection thread stack. Threads count toward the pod's 256-pid limit, so keep them light.
-const STACK_SIZE: usize = 256 << 10;
+/// Event-loop threads (the entry has 2 CPUs). Handlers run on them, so give them a full stack.
+const LOOPS: usize = 2;
+const STACK_SIZE: usize = 8 << 20;
+/// Largest request head (request line + headers) buffered before the connection is dropped.
+const MAX_HEAD: usize = 1 << 20;
 
 pub struct Request {
     pub method: String,
@@ -114,25 +120,217 @@ fn reason(status: u16) -> &'static str {
     }
 }
 
-/// Accept forever; each connection gets its own thread running `handler` per request.
+/// Accept forever and hand each connection to one of the event loops (round robin).
 pub fn serve(listener: TcpListener, handler: fn(&Request) -> Response) {
-    for stream in listener.incoming() {
+    let loops: Vec<i32> = (0..LOOPS)
+        .map(|_| {
+            // SAFETY: plain syscall wrapper.
+            let ep = unsafe { epoll_create1(EPOLL_CLOEXEC) };
+            assert!(ep >= 0, "epoll_create1 failed");
+            thread::Builder::new().stack_size(STACK_SIZE).spawn(move || event_loop(ep, handler)).expect("spawn event loop");
+            ep
+        })
+        .collect();
+    for (i, stream) in listener.incoming().enumerate() {
         let Ok(stream) = stream else { continue };
-        let _ = thread::Builder::new().stack_size(STACK_SIZE).spawn(move || {
-            let _ = connection(stream, handler);
-            crate::util::alloc::flush();
-        });
+        let _ = stream.set_nodelay(true);
+        quickack(&stream);
+        bufsizes(&stream);
+        if stream.set_nonblocking(true).is_err() {
+            continue;
+        }
+        let fd = stream.as_raw_fd();
+        let conn = Box::into_raw(Box::new(Conn { stream, inbuf: Vec::new(), out: Vec::new(), sent: 0, close_after: false, interest: IN }));
+        let mut ev = EpollEvent { events: IN, data: conn as u64 };
+        // SAFETY: fd is open; after a successful ADD only that loop touches `conn`.
+        if unsafe { epoll_ctl(loops[i % LOOPS], EPOLL_CTL_ADD, fd, &mut ev) } != 0 {
+            // SAFETY: not registered, still ours.
+            drop(unsafe { Box::from_raw(conn) });
+        }
+    }
+}
+
+struct Conn {
+    stream: TcpStream,
+    inbuf: Vec<u8>,
+    out: Vec<u8>,
+    sent: usize,
+    close_after: bool,
+    interest: u32,
+}
+
+#[repr(C, packed)]
+#[derive(Clone, Copy)]
+struct EpollEvent {
+    events: u32,
+    data: u64,
+}
+
+const EPOLLIN: u32 = 0x1;
+const EPOLLOUT: u32 = 0x4;
+const EPOLLRDHUP: u32 = 0x2000;
+const IN: u32 = EPOLLIN | EPOLLRDHUP;
+const OUT: u32 = EPOLLOUT | EPOLLRDHUP;
+const EPOLL_CTL_ADD: i32 = 1;
+const EPOLL_CTL_DEL: i32 = 2;
+const EPOLL_CTL_MOD: i32 = 3;
+const EPOLL_CLOEXEC: i32 = 0x80000;
+
+fn event_loop(ep: i32, handler: fn(&Request) -> Response) {
+    let mut evs = [EpollEvent { events: 0, data: 0 }; 64];
+    let mut scratch = vec![0u8; 64 << 10];
+    loop {
+        // SAFETY: evs is a live buffer of 64 events.
+        let n = unsafe { epoll_wait(ep, evs.as_mut_ptr(), evs.len() as i32, -1) };
+        for e in evs.iter().take(n.max(0) as usize) {
+            let ptr = e.data as *mut Conn;
+            // SAFETY: registered by serve(); only this loop uses it until it is freed below.
+            let c = unsafe { &mut *ptr };
+            match drive(c, &mut scratch, handler) {
+                Some(want) if want == c.interest => {}
+                Some(want) => {
+                    c.interest = want;
+                    let mut ev = EpollEvent { events: want, data: ptr as u64 };
+                    // SAFETY: fd still registered.
+                    unsafe { epoll_ctl(ep, EPOLL_CTL_MOD, c.stream.as_raw_fd(), &mut ev) };
+                }
+                None => {
+                    let mut ev = EpollEvent { events: 0, data: 0 };
+                    // SAFETY: deregister, then free the connection exactly once.
+                    unsafe {
+                        epoll_ctl(ep, EPOLL_CTL_DEL, c.stream.as_raw_fd(), &mut ev);
+                        drop(Box::from_raw(ptr));
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Advance one connection: flush pending output, read what arrived, answer every complete request.
+/// Returns the epoll interest to keep, or None to close.
+fn drive(c: &mut Conn, scratch: &mut [u8], handler: fn(&Request) -> Response) -> Option<u32> {
+    if !flush(c)? {
+        return Some(OUT);
+    }
+    if c.close_after {
+        return None;
+    }
+    let mut eof = false;
+    loop {
+        match (&c.stream).read(scratch) {
+            Ok(0) => {
+                eof = true;
+                break;
+            }
+            Ok(n) => {
+                c.inbuf.extend_from_slice(&scratch[..n]);
+                if n < scratch.len() {
+                    break;
+                }
+            }
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+            Err(_) => return None,
+        }
+    }
+    while let Some((req, keep_alive, used)) = try_parse(&c.inbuf).ok()? {
+        c.inbuf.drain(..used);
+        let res = handler(&req);
+        encode(&mut c.out, &res, keep_alive, req.method == "HEAD");
+        if !keep_alive {
+            c.close_after = true;
+            break;
+        }
+    }
+    if eof {
+        c.close_after = true;
+    }
+    if !flush(c)? {
+        return Some(OUT);
+    }
+    if c.close_after { None } else { Some(IN) }
+}
+
+/// Write pending output. Some(true) when all of it is out, Some(false) when the socket is full.
+fn flush(c: &mut Conn) -> Option<bool> {
+    while c.sent < c.out.len() {
+        match (&c.stream).write(&c.out[c.sent..]) {
+            Ok(0) => return None,
+            Ok(n) => c.sent += n,
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => return Some(false),
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+            Err(_) => return None,
+        }
+    }
+    c.out.clear();
+    c.sent = 0;
+    Some(true)
+}
+
+/// One complete request from the front of `buf` (with the bytes it used), Ok(None) if more must arrive.
+fn try_parse(buf: &[u8]) -> io::Result<Option<(Request, bool, usize)>> {
+    let Some(head_end) = buf.windows(4).position(|w| w == b"\r\n\r\n") else {
+        return if buf.len() > MAX_HEAD { Err(io::ErrorKind::InvalidData.into()) } else { Ok(None) };
+    };
+    // Don't re-parse (and re-copy) a large body on every arriving segment.
+    if let Some(n) = content_length(&buf[..head_end]) {
+        if n <= MAX_BODY && buf.len() < head_end + 4 + n {
+            return Ok(None);
+        }
+    }
+    let mut r: &[u8] = buf;
+    match read_request(&mut r) {
+        Ok(Some((req, keep_alive))) => Ok(Some((req, keep_alive, buf.len() - r.len()))),
+        Ok(None) => Ok(None),
+        Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+fn content_length(head: &[u8]) -> Option<usize> {
+    head.split(|&b| b == b'\n').find_map(|l| {
+        let l = l.strip_suffix(b"\r").unwrap_or(l);
+        let colon = l.iter().position(|&b| b == b':')?;
+        l[..colon].trim_ascii().eq_ignore_ascii_case(b"content-length").then(|| std::str::from_utf8(l[colon + 1..].trim_ascii()).ok()?.parse().ok())?
+    })
+}
+
+fn encode(out: &mut Vec<u8>, res: &Response, keep_alive: bool, head: bool) {
+    out.extend_from_slice(b"HTTP/1.1 ");
+    push_num(out, res.status as u64);
+    out.push(b' ');
+    out.extend_from_slice(reason(res.status).as_bytes());
+    out.extend_from_slice(b"\r\n");
+    for (k, v) in &res.headers {
+        out.extend_from_slice(k.as_bytes());
+        out.extend_from_slice(b": ");
+        out.extend_from_slice(v.as_bytes());
+        out.extend_from_slice(b"\r\n");
+    }
+    let body: &[u8] = res.shared.as_deref().unwrap_or(&res.body);
+    out.extend_from_slice(b"content-length: ");
+    push_num(out, body.len() as u64);
+    out.extend_from_slice(b"\r\n");
+    if !keep_alive {
+        out.extend_from_slice(b"connection: close\r\n");
+    }
+    out.extend_from_slice(b"\r\n");
+    if !head {
+        out.extend_from_slice(body);
     }
 }
 
 unsafe extern "C" {
     fn setsockopt(fd: i32, level: i32, name: i32, value: *const std::ffi::c_void, len: u32) -> i32;
+    fn epoll_create1(flags: i32) -> i32;
+    fn epoll_ctl(epfd: i32, op: i32, fd: i32, event: *mut EpollEvent) -> i32;
+    fn epoll_wait(epfd: i32, events: *mut EpollEvent, maxevents: i32, timeout: i32) -> i32;
 }
 
 /// Ask the kernel (or gVisor's netstack) to ACK at once instead of delaying ACKs on this socket.
 /// Best effort: a failure changes nothing.
 fn quickack(stream: &TcpStream) {
-    use std::os::fd::AsRawFd;
     const IPPROTO_TCP: i32 = 6;
     const TCP_QUICKACK: i32 = 12;
     let on: i32 = 1;
@@ -142,7 +340,6 @@ fn quickack(stream: &TcpStream) {
 
 /// Larger socket buffers so a big request or response moves in fewer windows. Best effort.
 fn bufsizes(stream: &TcpStream) {
-    use std::os::fd::AsRawFd;
     const SOL_SOCKET: i32 = 1;
     const SO_SNDBUF: i32 = 7;
     const SO_RCVBUF: i32 = 8;
@@ -153,48 +350,8 @@ fn bufsizes(stream: &TcpStream) {
     }
 }
 
-fn connection(stream: TcpStream, handler: fn(&Request) -> Response) -> io::Result<()> {
-    stream.set_nodelay(true)?;
-    quickack(&stream);
-    bufsizes(&stream);
-    let mut writer = stream.try_clone()?;
-    let mut reader = BufReader::with_capacity(64 << 10, stream);
-    let mut out = Vec::with_capacity(4096);
-    loop {
-        let Some((req, keep_alive)) = read_request(&mut reader)? else { return Ok(()) };
-        let res = handler(&req);
-        out.clear();
-        out.extend_from_slice(b"HTTP/1.1 ");
-        push_num(&mut out, res.status as u64);
-        out.push(b' ');
-        out.extend_from_slice(reason(res.status).as_bytes());
-        out.extend_from_slice(b"\r\n");
-        for (k, v) in &res.headers {
-            out.extend_from_slice(k.as_bytes());
-            out.extend_from_slice(b": ");
-            out.extend_from_slice(v.as_bytes());
-            out.extend_from_slice(b"\r\n");
-        }
-        let body: &[u8] = res.shared.as_deref().unwrap_or(&res.body);
-        out.extend_from_slice(b"content-length: ");
-        push_num(&mut out, body.len() as u64);
-        out.extend_from_slice(b"\r\n");
-        if !keep_alive {
-            out.extend_from_slice(b"connection: close\r\n");
-        }
-        out.extend_from_slice(b"\r\n");
-        if req.method != "HEAD" {
-            out.extend_from_slice(body);
-        }
-        writer.write_all(&out)?;
-        if !keep_alive {
-            return Ok(());
-        }
-    }
-}
-
 /// Read one request; Ok(None) on a clean close before a request line.
-fn read_request(r: &mut BufReader<TcpStream>) -> io::Result<Option<(Request, bool)>> {
+fn read_request<R: BufRead>(r: &mut R) -> io::Result<Option<(Request, bool)>> {
     let mut line = String::new();
     // Tolerate stray CRLFs between keep-alive requests.
     loop {
@@ -268,7 +425,7 @@ fn push_num(out: &mut Vec<u8>, mut n: u64) {
     out.extend_from_slice(&d[i..]);
 }
 
-fn read_chunked(r: &mut BufReader<TcpStream>) -> io::Result<Vec<u8>> {
+fn read_chunked<R: BufRead>(r: &mut R) -> io::Result<Vec<u8>> {
     let mut body = Vec::new();
     let mut line = String::new();
     loop {
@@ -332,6 +489,67 @@ mod tests {
         push_num(&mut o, 18446744073709551615);
         assert_eq!(o, b"0 18446744073709551615");
         assert!(has_token("Keep-Alive, Upgrade", b"keep-alive") && !has_token("upgrade", b"close"));
+    }
+
+    fn big(req: &Request) -> Response {
+        let n: usize = req.query.parse().unwrap_or(0);
+        Response::new(200, "text/plain", vec![b'x'; n])
+    }
+
+    fn start(h: fn(&Request) -> Response) -> u16 {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        thread::spawn(move || serve(l, h));
+        port
+    }
+
+    fn read_response(s: &mut TcpStream) -> (String, usize) {
+        let mut head = Vec::new();
+        let mut b = [0u8; 1];
+        while !head.ends_with(b"\r\n\r\n") {
+            s.read_exact(&mut b).unwrap();
+            head.push(b[0]);
+        }
+        let h = String::from_utf8(head).unwrap();
+        let n: usize = h.lines().find_map(|l| l.strip_prefix("content-length: ")).unwrap().trim().parse().unwrap();
+        let mut body = vec![0u8; n];
+        s.read_exact(&mut body).unwrap();
+        (h, n)
+    }
+
+    #[test]
+    fn split_pipelined_and_large() {
+        let port = start(big);
+        let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        // A request split across writes, then two pipelined in one write, the second 8 MiB.
+        s.write_all(b"GET /a?5 HT").unwrap();
+        thread::sleep(std::time::Duration::from_millis(20));
+        s.write_all(b"TP/1.1\r\n\r\n").unwrap();
+        assert_eq!(read_response(&mut s).1, 5);
+        s.write_all(b"GET /b?3 HTTP/1.1\r\n\r\nGET /c?8388608 HTTP/1.1\r\n\r\n").unwrap();
+        assert_eq!(read_response(&mut s).1, 3);
+        assert_eq!(read_response(&mut s).1, 8 << 20);
+        // A 3 MiB body arriving in pieces.
+        let body = vec![b'y'; 3 << 20];
+        s.write_all(format!("POST /d HTTP/1.1\r\nContent-Length: {}\r\n\r\n", body.len()).as_bytes()).unwrap();
+        for c in body.chunks(100_000) {
+            s.write_all(c).unwrap();
+        }
+        assert_eq!(read_response(&mut s).1, 0);
+    }
+
+    #[test]
+    fn many_concurrent_keep_alive() {
+        let port = start(echo);
+        let mut conns: Vec<TcpStream> = (0..120).map(|_| TcpStream::connect(("127.0.0.1", port)).unwrap()).collect();
+        for _ in 0..3 {
+            for c in conns.iter_mut() {
+                c.write_all(b"GET /x HTTP/1.1\r\n\r\n").unwrap();
+            }
+            for c in conns.iter_mut() {
+                assert!(read_response(c).0.starts_with("HTTP/1.1 200"));
+            }
+        }
     }
 
     #[test]
