@@ -106,7 +106,7 @@ fn cached(r: &mut Repo, number: u64) -> Option<Arc<[u8]>> {
 
 fn get(repo: &RepoRef, n: u64) -> Response {
     match cached(&mut lock(repo), n) {
-        Some(b) => Response::json(200, b.to_vec()),
+        Some(b) => Response::json(200, Vec::new()).with_shared(b),
         None => Response::not_found(),
     }
 }
@@ -155,7 +155,7 @@ fn create(req: &Request, repo: &RepoRef) -> Response {
         Err(_) => return Response::error(422, "Unprocessable Entity"),
     };
     let bytes = cached(&mut r, n).unwrap();
-    Response::json(201, bytes.to_vec())
+    Response::json(201, Vec::new()).with_shared(bytes)
 }
 
 fn list(req: &Request, repo: &RepoRef) -> Response {
@@ -214,5 +214,5 @@ fn patch(req: &Request, repo: &RepoRef, n: u64) -> Response {
         i.labels = l;
     }
     let bytes = cached(&mut r, n).unwrap();
-    Response::json(200, bytes.to_vec())
+    Response::json(200, Vec::new()).with_shared(bytes)
 }

@@ -40,7 +40,7 @@ pub fn handle(req: &Request, parts: &[&str]) -> Response {
             _ => Response::new(403, "text/plain", b"dumb HTTP is not supported\n".to_vec()),
         },
         ("POST", ["git-upload-pack"]) => match upload_pack::handle(&repo, body) {
-            Ok(b) => Response::new(200, "application/x-git-upload-pack-result", b),
+            Ok(b) => Response::new(200, "application/x-git-upload-pack-result", Vec::new()).with_shared(b),
             Err(e) => Response::new(400, "text/plain", e.into_bytes()),
         },
         ("POST", ["git-receive-pack"]) => match receive_pack::handle(&repo, body) {

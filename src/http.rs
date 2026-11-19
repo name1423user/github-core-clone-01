@@ -49,13 +49,15 @@ pub struct Response {
     pub status: u16,
     pub headers: Vec<(&'static str, String)>,
     pub body: Vec<u8>,
+    /// Pre-rendered body shared with a cache; written instead of `body` without copying it first.
+    pub shared: Option<std::sync::Arc<[u8]>>,
 }
 
 static REQUEST_SEQ: AtomicU64 = AtomicU64::new(0);
 
 impl Response {
     pub fn new(status: u16, content_type: &str, body: Vec<u8>) -> Response {
-        Response { status, headers: vec![("content-type", content_type.to_string())], body }
+        Response { status, headers: vec![("content-type", content_type.to_string())], body, shared: None }
     }
 
     /// A JSON reply; every one carries a non-empty X-GitHub-Request-Id (RULES: wire contract).
@@ -77,6 +79,11 @@ impl Response {
         crate::util::json::write_str(&mut b, message);
         b.push_str(",\"documentation_url\":\"https://docs.github.com/rest\"}");
         Response::json(status, b)
+    }
+
+    pub fn with_shared(mut self, body: std::sync::Arc<[u8]>) -> Response {
+        self.shared = Some(body);
+        self
     }
 
     pub fn with_header(mut self, name: &'static str, value: impl Into<String>) -> Response {
@@ -128,13 +135,14 @@ fn connection(stream: TcpStream, handler: fn(&Request) -> Response) -> io::Resul
         for (k, v) in &res.headers {
             write!(out, "{k}: {v}\r\n")?;
         }
-        write!(out, "content-length: {}\r\n", res.body.len())?;
+        let body: &[u8] = res.shared.as_deref().unwrap_or(&res.body);
+        write!(out, "content-length: {}\r\n", body.len())?;
         if !keep_alive {
             out.extend_from_slice(b"connection: close\r\n");
         }
         out.extend_from_slice(b"\r\n");
         if req.method != "HEAD" {
-            out.extend_from_slice(&res.body);
+            out.extend_from_slice(body);
         }
         writer.write_all(&out)?;
         if !keep_alive {
